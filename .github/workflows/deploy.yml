@@ -29,12 +29,16 @@ jobs:
           t=open(p).read()
           t=t.replace('compileSdk = 34', 'compileSdk = 34\n    ndkVersion = \"27.0.12077973\"')
           open(p,'w').write(t)
-          print(t)
           "
       - name: Install deps
         run: flutter pub get
       - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
       - name: Build Web
         run: flutter build web --release
       - name: Deploy Web
