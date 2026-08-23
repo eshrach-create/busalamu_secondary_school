@@ -1,0 +1,38 @@
+name: Build BSS GoB APK + Web
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: 'stable'
+
+      - run: flutter pub get
+
+      - name: Build APK - Real Camera
+        run: flutter build apk --release
+
+      - name: Build Web - HT Portal
+        run: flutter build web --release --web-renderer canvaskit
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BSS-GoB-APK-REAL-CAMERA
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_BUSALAMU_BSS_GOB }}'
+          channelId: live
+          projectId: busalamu-bss-gob
