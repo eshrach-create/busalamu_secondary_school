@@ -1,43 +1,35 @@
 name: Build and Deploy
-
 on:
   push:
     branches: [ main ]
-
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.32.8'
           channel: 'stable'
           cache: true
-
       - name: Fix flutter.gradle fileMode bug
         run: |
           sed -i 's/\.fileMode/.fileMode()/g' $FLUTTER_ROOT/packages/flutter_tools/gradle/src/main/groovy/flutter.groovy || true
           sed -i 's/\.fileMode/.fileMode()/g' /opt/hostedtoolcache/flutter/stable-3.32.8-x64/flutter/packages/flutter_tools/gradle/src/main/groovy/flutter.groovy || true
-
       - name: Recreate Android
-        run: flutter create . --platforms=android --project-name busalamu_secondary_school --overwrite
-
+        run: |
+          rm -rf android
+          flutter create . --platforms=android --project-name busalamu_secondary_school
       - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
-
       - name: Build Web
         run: flutter build web --release
-
       - name: Deploy Web to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
