@@ -14,7 +14,7 @@ dependencies:
   cloud_firestore: ^4.17.0
   mobile_scanner: ^5.2.3
   file_picker: ^8.1.6
-  excel: ^4.0.8
+  excel: ^4.0.6
   printing: ^5.12.0
   url_launcher: ^6.2.5
   qr_flutter: ^4.1.0
