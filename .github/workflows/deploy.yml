@@ -1,9 +1,11 @@
-name: Build BSS GoB APK + Web
+name: Build and Deploy
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -14,42 +16,29 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
-          
+          java-version: '21'
+
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
+          flutter-version: '3.32.8'
           channel: 'stable'
           cache: true
-          
-      - name: Clean
+
+      - name: Fix flutter.gradle fileMode bug
         run: |
-          rm -rf build .dart_tool
-          flutter clean
-          
-      - name: Get packages
-        run: flutter pub get
-        
+          sed -i 's/\.fileMode/.fileMode()/g' $FLUTTER_ROOT/packages/flutter_tools/gradle/src/main/groovy/flutter.groovy || true
+          sed -i 's/\.fileMode/.fileMode()/g' /opt/hostedtoolcache/flutter/stable-3.32.8-x64/flutter/packages/flutter_tools/gradle/src/main/groovy/flutter.groovy || true
+
+      - name: Recreate Android
+        run: flutter create . --platforms=android --project-name busalamu_secondary_school --overwrite
+
       - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
-        
+
       - name: Build Web
         run: flutter build web --release
-        
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BSS-GoB-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
-          
-      - name: Upload Web
-        uses: actions/upload-artifact@v4
-        with:
-          name: BSS-GoB-Web
-          path: build/web
 
-      - name: Deploy Web to GitHub Pages
-        if: success()
+      - name: Deploy Web to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
