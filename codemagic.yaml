@@ -1,0 +1,24 @@
+workflows:
+  ios-free:
+    name: Busalamu iOS (Windows)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get packages
+        script: flutter pub get
+      - name: Pod install
+        script: |
+          cd ios && pod install --repo-update || true
+      - name: Build IPA without signing
+        script: |
+          flutter build ios --release --no-codesign
+          cd build/ios/iphoneos
+          mkdir Payload
+          cp -r Runner.app Payload
+          zip -r Busalamu-Secondary.ipa Payload
+    artifacts:
+      - build/ios/iphoneos/Busalamu-Secondary.ipa
