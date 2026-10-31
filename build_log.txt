@@ -1,0 +1,29 @@
+Running Gradle task 'bundleRelease'...                          
+e: file:///C:/Users/Quin%20Ton%20Tavius/Desktop/busalamu_secondary_school/android/app/build.gradle.kts:64:12: Unresolved reference 'packaging'.
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Build file 'C:\Users\Quin Ton Tavius\Desktop\busalamu_secondary_school\android\app\build.gradle.kts' line: 15
+
+* What went wrong:
+Script compilation errors:
+
+  Line 15: android {
+           ^ 'fun Project.android(configure: Action<BaseAppModuleExtension>): Unit' is deprecated. Replaced by com.android.build.api.dsl.ApplicationExtension.
+               This class is not used for the public extensions in AGP when android.newDsl=true, which is the default in AGP 9.0, and will be removed in AGP 10.0.
+
+  Line 64:         it.packaging.jniLibs.keepDebugSymbols.add("**/*.so")
+                      ^ Unresolved reference 'packaging'.
+
+2 errors
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 8s
+Running Gradle task 'bundleRelease'...                              8.5s
+Gradle task bundleRelease failed with exit code 1

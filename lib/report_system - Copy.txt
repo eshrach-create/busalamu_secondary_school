@@ -1,0 +1,470 @@
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'timetable_model.dart';
+
+// ========== UNEB GRADING 2024-2026 ==========
+class UNEBGrading {
+  static Map<String, dynamic> oLevelNew(double m) {
+    if (m >= 80) return {'grade': 'A', 'desc': 'Exceptional'};
+    if (m >= 70) return {'grade': 'B', 'desc': 'Outstanding'};
+    if (m >= 60) return {'grade': 'C', 'desc': 'Satisfactory'};
+    if (m >= 50) return {'grade': 'D', 'desc': 'Basic'};
+    if (m >= 40) return {'grade': 'E', 'desc': 'Elementary'};
+    return {'grade': 'O', 'desc': 'Below Basic'};
+  }
+  static Map<String, dynamic> oLevelOld(double m) {
+    if (m >= 80) return {'grade': 'D1'};
+    if (m >= 70) return {'grade': 'D2'};
+    if (m >= 65) return {'grade': 'C3'};
+    if (m >= 60) return {'grade': 'C4'};
+    if (m >= 55) return {'grade': 'C5'};
+    if (m >= 50) return {'grade': 'C6'};
+    if (m >= 45) return {'grade': 'P7'};
+    if (m >= 35) return {'grade': 'P8'};
+    return {'grade': 'F'};
+  }
+  static Map<String, dynamic> aLevel(double m) {
+    if (m >= 80) return {'grade': 'A', 'point': 6};
+    if (m >= 70) return {'grade': 'B', 'point': 5};
+    if (m >= 65) return {'grade': 'C', 'point': 4};
+    if (m >= 60) return {'grade': 'D', 'point': 3};
+    if (m >= 55) return {'grade': 'E', 'point': 2};
+    if (m >= 45) return {'grade': 'O', 'point': 1};
+    return {'grade': 'F', 'point': 0};
+  }
+  static String gradeOnly(String system, double m) {
+    if (system == "A Level") return aLevel(m)['grade'];
+    if (system == "New Curriculum") return oLevelNew(m)['grade'];
+    return oLevelOld(m)['grade'];
+  }
+}
+
+class ReportSystemHome extends StatelessWidget {
+  final dynamic curUser;
+  const ReportSystemHome({super.key, this.curUser});
+  @override Widget build(BuildContext c) => AccountMatchPage(curUser: curUser);
+}
+
+class AccountMatchPage extends StatefulWidget {
+  final dynamic curUser;
+  const AccountMatchPage({super.key, this.curUser});
+  @override State<AccountMatchPage> createState() => _AccountMatchPageState();
+}
+
+class _AccountMatchPageState extends State<AccountMatchPage> {
+  List<Map<String,dynamic>> teachers = [];
+  bool loading = true;
+
+  bool get isHTorAdmin {
+    if(widget.curUser==null) return true;
+    String r = (widget.curUser.role??'').toString().toLowerCase();
+    return r.contains('ht') || r.contains('admin') || r.contains('dos') || r.contains('deputy');
+  }
+  String get myName => widget.curUser?.name??'';
+
+  Future<List<Timetable>> _getTimetableFor(String name) async {
+    var snap = await FirebaseFirestore.instance.collection('timetable').where('teacher', isEqualTo: name).get();
+    return snap.docs.map((d)=> Timetable.fromMap(d.data())).toList();
+  }
+
+  Future<void> _loadTeachers() async {
+    if(!isHTorAdmin && myName.isNotEmpty){
+      var snap = await FirebaseFirestore.instance.collection('teacher_profiles').where('name', isEqualTo: myName).get();
+      if(snap.docs.isEmpty) snap = await FirebaseFirestore.instance.collection('accounts').where('name', isEqualTo: myName).get();
+      if(snap.docs.isNotEmpty){
+        var t = {'id': snap.docs.first.id,...snap.docs.first.data()};
+        var tt = await _getTimetableFor(t['name']??myName);
+        if(mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_)=> SubjectClassSelectPage(teacher: t, myTimetable: tt, curUser: widget.curUser)));
+        return;
+      }
+    }
+    var snap = await FirebaseFirestore.instance.collection('teacher_profiles').get();
+    if(snap.docs.isEmpty) snap = await FirebaseFirestore.instance.collection('accounts').get();
+    setState((){
+      teachers = snap.docs.map((d)=> {'id':d.id,...d.data()}).toList();
+      loading=false;
+    });
+  }
+
+  @override void initState(){ super.initState(); _loadTeachers(); }
+
+  @override Widget build(BuildContext c){
+    if(!isHTorAdmin && loading) return Scaffold(body: Center(child: CircularProgressIndicator()));
+
+    if(isHTorAdmin){
+      return Scaffold(
+        appBar: AppBar(title: Text("REPORTS - HT DASHBOARD"), backgroundColor: Color(0xFF0D47A1), foregroundColor: Colors.white),
+        body: loading? Center(child: CircularProgressIndicator()):
+        ListView(padding: EdgeInsets.all(12), children: [
+          Card(color: Colors.indigo.shade700, child: ListTile(
+            leading: Icon(Icons.assessment, color: Colors.white, size: 32),
+            title: Text("CLASS OVERALL REPORTS (MERGED)", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            subtitle: Text("HT View: See missing + filled, print merged report cards", style: TextStyle(color: Colors.white70, fontSize:11)),
+            trailing: Icon(Icons.arrow_forward, color: Colors.white),
+            onTap: ()=> Navigator.push(c, MaterialPageRoute(builder: (_)=> HTClassOverallPage(curUser: widget.curUser))),
+          )),
+          SizedBox(height:8),
+          Container(padding: EdgeInsets.all(8), color: Colors.amber.shade50, child: Text("Teachers Entry Status - Tap teacher to see his marks", style: TextStyle(fontWeight: FontWeight.bold, fontSize:11))),
+         ...teachers.map((t){
+            String name = t['name']?? t['id'];
+            return Card(child: ListTile(
+              leading: CircleAvatar(backgroundColor: Colors.indigo, child: Text((t['initials']?? name[0]).toString().toUpperCase(), style: TextStyle(color: Colors.white, fontSize:12))),
+              title: Text(name, style: TextStyle(fontWeight: FontWeight.bold, fontSize:13)),
+              subtitle: FutureBuilder<List<Timetable>>(future: _getTimetableFor(name), builder: (ctx, s){
+                if(!s.hasData) return Text("Loading...", style: TextStyle(fontSize:10));
+                var list = s.data!;
+                return Text("Teaches: ${list.map((e)=> "${e.cls}${e.stream[0]} ${e.subject}").toSet().join(", ")} | Tap to view his entries", style: TextStyle(fontSize:10));
+              }),
+              trailing: Icon(Icons.arrow_forward_ios, size:14),
+              onTap: () async {
+                var tt = await _getTimetableFor(name);
+                if(c.mounted) Navigator.push(c, MaterialPageRoute(builder: (_)=> SubjectClassSelectPage(teacher: t, myTimetable: tt, curUser: widget.curUser)));
+              },
+            ));
+          }),
+        ]),
+      );
+    }
+
+    // Teacher auto-redirected above, fallback
+    return Scaffold(body: Center(child: CircularProgressIndicator()));
+  }
+}
+
+// ======== HT CLASS OVERALL PAGE - FIXED STREAMS + MISSING ========
+class HTClassOverallPage extends StatefulWidget {
+  final dynamic curUser;
+  const HTClassOverallPage({super.key, this.curUser});
+  @override State<HTClassOverallPage> createState()=> _HTClassOverallPageState();
+}
+
+class _HTClassOverallPageState extends State<HTClassOverallPage> {
+  String? selClass, selStream, selTerm, selExam;
+  List<String> allTerms = ["Term I 2026","Term II 2026","Term III 2026"];
+  List<String> examTypes = ["BOT","MID","EOT"];
+  List<String> classes = ["S.1","S.2","S.3","S.4","S.5","S.6"];
+  List<String> streams = []; // dynamic now
+
+  List<Map<String,dynamic>> students=[];
+  List<Map<String,dynamic>> allMarks=[];
+  List<Timetable> classTimetable=[];
+  bool loading=false;
+  bool loadingStreams=false;
+
+  String get grading => (selClass=='S.5'||selClass=='S.6')? "A Level" : "New Curriculum";
+  bool get isALevel => selClass=='S.5'||selClass=='S.6';
+
+  Future<void> _loadStreamsForClass(String cls) async {
+    setState((){ loadingStreams=true; streams=[]; selStream=null; });
+    Set<String> streamSet = {};
+
+    // 1. Try from students collection (most reliable)
+    try{
+      var stuSnap = await FirebaseFirestore.instance.collection('students').where('cls', isEqualTo: cls).get();
+      for(var d in stuSnap.docs){
+        var s = d.data()['stream'];
+        if(s!=null && s.toString().trim().isNotEmpty) streamSet.add(s.toString());
+      }
+    }catch(e){}
+
+    // 2. Try from timetable collection
+    try{
+      var ttSnap = await FirebaseFirestore.instance.collection('timetable').where('cls', isEqualTo: cls).get();
+      for(var d in ttSnap.docs){
+        var s = d.data()['stream'];
+        if(s!=null && s.toString().trim().isNotEmpty) streamSet.add(s.toString());
+      }
+    }catch(e){}
+
+    // 3. Fallback defaults based on level
+    if(streamSet.isEmpty){
+      if(isALevel){
+        streamSet = {"Science","Arts","Commerce","BCM","MEG","BAG","Science A","Science B","Arts A"};
+      }else{
+        streamSet = {"Blue","Red","Green","Yellow","West","East","North","South"};
+      }
+    }
+
+    setState((){
+      streams = streamSet.toList()..sort();
+      loadingStreams=false;
+    });
+  }
+
+  Future<void> loadData() async {
+    if(selClass==null||selStream==null||selTerm==null||selExam==null) return;
+    setState(()=> loading=true);
+    
+    var stuSnap = await FirebaseFirestore.instance.collection('students').where('cls', isEqualTo: selClass).where('stream', isEqualTo: selStream).get();
+    var markSnap = await FirebaseFirestore.instance.collection('marks').where('cls', isEqualTo: selClass).where('stream', isEqualTo: selStream).where('term', isEqualTo: selTerm).where('exam', isEqualTo: selExam).get();
+    var ttSnap = await FirebaseFirestore.instance.collection('timetable').where('cls', isEqualTo: selClass).where('stream', isEqualTo: selStream).get();
+
+    setState((){
+      students = stuSnap.docs.map((d)=> d.data()).toList();
+      allMarks = markSnap.docs.map((d)=> d.data()).toList();
+      classTimetable = ttSnap.docs.map((d)=> Timetable.fromMap(d.data())).toList();
+      loading=false;
+    });
+  }
+
+  List<String> get expectedSubjects {
+    // Priority 1: From timetable grid
+    if(classTimetable.isNotEmpty){
+      return classTimetable.map((e)=> e.subject).toSet().toList()..sort();
+    }
+    // Priority 2: From marks already entered (if timetable not set)
+    if(allMarks.isNotEmpty){
+      return allMarks.map((e)=> e['subject'].toString()).toSet().toList()..sort();
+    }
+    // Priority 3: Fallback default by level
+    if(isALevel){
+      return ["MATH","ENT","ECON","GEO","HIST","LIT","PHY","CHEM","BIO","CRE","IRE","GP"];
+    }else{
+      return ["MATH","ENG","PHY","CHEM","BIO","HIST","GEO","CRE","COMMERCE","ENT","KISW","LUG","ICT","AGRIC"];
+    }
+  }
+
+  Future<void> generateMergedReport(String sid, String sname) async {
+    var sMarks = allMarks.where((e)=> e['studentId']==sid).toList();
+    double total=0; for(var m in sMarks) total+= (m['mark'] as num).toDouble();
+    double avg = sMarks.isEmpty?0: total/sMarks.length;
+    String finalGrade = UNEBGrading.gradeOnly(grading, avg);
+
+    final pdf = pw.Document();
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      header: (c)=> pw.Column(children: [
+        pw.Center(child: pw.Text("BUSALAMU SECONDARY SCHOOL", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16))),
+        pw.Center(child: pw.Text("${selTerm} ${selExam} - MERGED REPORT", style: pw.TextStyle(fontSize: 11))),
+        pw.Center(child: pw.Text("${selClass} ${selStream} | $grading", style: pw.TextStyle(fontSize:9))),
+        pw.Divider(),
+      ]),
+      build: (c)=> [
+        pw.Text("Name: $sname | ID: $sid | Class: ${selClass} ${selStream}"),
+        pw.SizedBox(height:10),
+        pw.Table.fromTextArray(
+          headers: ["Subject","Mark","Grade","Teacher"],
+          data: sMarks.map((m)=> [
+            m['subject'].toString(),
+            m['mark'].toString(),
+            UNEBGrading.gradeOnly(grading, (m['mark'] as num).toDouble()),
+            (m['teacherName']??'').toString()
+          ]).toList(),
+          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize:9),
+          headerDecoration: pw.BoxDecoration(color: PdfColors.indigo),
+          cellStyle: pw.TextStyle(fontSize:9),
+        ),
+        pw.SizedBox(height:8),
+        if(expectedSubjects.length!= sMarks.length)
+          pw.Container(padding: pw.EdgeInsets.all(6), color: PdfColors.amber100, child: pw.Text("Missing: ${expectedSubjects.where((sub)=>!sMarks.any((m)=> m['subject']==sub)).join(', ')}", style: pw.TextStyle(fontSize:8, color: PdfColors.red))),
+        pw.SizedBox(height:10),
+        pw.Text("Average: ${avg.toStringAsFixed(1)} | Grade: $finalGrade | ${sMarks.length}/${expectedSubjects.length} subjects", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+      ]
+    ));
+    await Printing.layoutPdf(onLayout: (f) async => pdf.save(), name: "${sname}_merged.pdf");
+  }
+
+  Future<void> printClassOverall() async {
+    List<Map<String,dynamic>> ranked = [];
+    for(var s in students){
+      String sid = s['idNo']??'';
+      var sMarks = allMarks.where((e)=> e['studentId']==sid).toList();
+      double avg = sMarks.isEmpty?0: sMarks.map((e)=> (e['mark'] as num).toDouble()).reduce((a,b)=>a+b)/sMarks.length;
+      ranked.add({...s, 'avg': avg, 'count': sMarks.length});
+    }
+    ranked.sort((a,b)=> (b['avg'] as double).compareTo(a['avg'] as double));
+
+    final pdf = pw.Document();
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4.landscape,
+      build: (c)=> [
+        pw.Text("BUSALAMU SS - ${selClass} ${selStream} ${selTerm} ${selExam} OVERALL", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height:8),
+        pw.Table.fromTextArray(
+          headers: ["Pos","Student","ID","Subs","Avg","Grade","Status"],
+          data: ranked.asMap().entries.map((e){
+            int pos=e.key+1; var s=e.value;
+            String status = s['count']>=expectedSubjects.length? "Complete" : "Missing ${expectedSubjects.length - s['count']}";
+            return [pos.toString(), s['name'].toString(), (s['idNo']??'').toString(), s['count'].toString(), (s['avg'] as double).toStringAsFixed(1), UNEBGrading.gradeOnly(grading, s['avg']), status];
+          }).toList(),
+          cellStyle: pw.TextStyle(fontSize:8),
+          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize:8, color: PdfColors.white),
+          headerDecoration: pw.BoxDecoration(color: PdfColors.indigo),
+        )
+      ]
+    ));
+    await Printing.layoutPdf(onLayout: (f) async => pdf.save(), name: "${selClass}_${selStream}_overall.pdf");
+  }
+
+  @override Widget build(BuildContext c){
+    return Scaffold(
+      appBar: AppBar(title: Text("HT - Class Overall"), backgroundColor: Color(0xFF0D47A1), foregroundColor: Colors.white, actions: [if(students.isNotEmpty) IconButton(icon: Icon(Icons.print), onPressed: printClassOverall)]),
+      body: ListView(padding: EdgeInsets.all(12), children: [
+        DropdownButtonFormField<String>(value: selClass, decoration: InputDecoration(labelText:"Class", border: OutlineInputBorder(), isDense:true), items: classes.map((e)=> DropdownMenuItem(value:e, child: Text(e))).toList(), onChanged: (v){ setState(()=> selClass=v); if(v!=null) _loadStreamsForClass(v); }),
+        SizedBox(height:8),
+        Row(children: [
+          Expanded(child: DropdownButtonFormField<String>(value: selStream, decoration: InputDecoration(labelText: isALevel? "Combination (Science/Arts)" : "Stream (Blue/Red)", border: OutlineInputBorder(), isDense:true), items: streams.map((e)=> DropdownMenuItem(value:e, child: Text(e))).toList(), onChanged: loadingStreams? null : (v)=> setState(()=> selStream=v))),
+          if(loadingStreams) Padding(padding: EdgeInsets.only(left:8), child: SizedBox(width:16, height:16, child: CircularProgressIndicator(strokeWidth:2))),
+        ]),
+        SizedBox(height:8),
+        Row(children: [
+          Expanded(child: DropdownButtonFormField<String>(value: selTerm, decoration: InputDecoration(labelText:"Term", border: OutlineInputBorder(), isDense:true), items: allTerms.map((e)=> DropdownMenuItem(value:e, child: Text(e))).toList(), onChanged: (v)=> setState(()=> selTerm=v))),
+          SizedBox(width:6),
+          Expanded(child: DropdownButtonFormField<String>(value: selExam, decoration: InputDecoration(labelText:"Exam", border: OutlineInputBorder(), isDense:true), items: examTypes.map((e)=> DropdownMenuItem(value:e, child: Text(e))).toList(), onChanged: (v)=> setState(()=> selExam=v))),
+        ]),
+        SizedBox(height:10),
+        ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF0D47A1), foregroundColor: Colors.white), onPressed: loadData, child: Text("LOAD CLASS")),
+        if(loading) Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator())),
+        if(!loading && students.isNotEmpty)...[
+          Container(padding: EdgeInsets.all(10), color: Colors.indigo.shade50, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text("Expected Subjects: ${expectedSubjects.join(', ')} (${expectedSubjects.length}) ${classTimetable.isEmpty? '(from marks - set timetable grid for accuracy)': '(from timetable grid)'}", style: TextStyle(fontWeight: FontWeight.bold, fontSize:11)),
+            SizedBox(height:4),
+            Text("Students: ${students.length} | Entered: ${allMarks.length} | Expected: ${students.length * expectedSubjects.length} | Missing Entries: ${students.length * expectedSubjects.length - allMarks.length}", style: TextStyle(fontSize:10, color: Colors.red, fontWeight: FontWeight.bold)),
+          ])),
+          SizedBox(height:8),
+          // Per subject summary
+          Container(padding: EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.grey.shade100, border: Border.all()), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text("Per Subject Status:", style: TextStyle(fontWeight: FontWeight.bold, fontSize:11)),
+            ...expectedSubjects.map((sub){
+              int entered = allMarks.where((m)=> m['subject']==sub).length;
+              int missing = students.length - entered;
+              return Text("$sub: $entered/${students.length} entered, $missing missing ${missing>0? '❌' : '✅'}", style: TextStyle(fontSize:10, color: missing>0? Colors.red : Colors.green));
+            })
+          ])),
+          SizedBox(height:8),
+         ...students.map((s){
+            String sid=s['idNo']??''; String sname=s['name']??'';
+            var sMarks = allMarks.where((e)=> e['studentId']==sid).toList();
+            double avg = sMarks.isEmpty?0: sMarks.map((e)=> (e['mark'] as num).toDouble()).reduce((a,b)=>a+b)/sMarks.length;
+            var missing = expectedSubjects.where((sub)=>!sMarks.any((m)=> m['subject']==sub)).toList();
+            bool complete = missing.isEmpty;
+            return Card(color: complete? Colors.white : Colors.red.shade50, margin: EdgeInsets.symmetric(vertical:3), child: ListTile(
+              dense:true,
+              title: Text(sname, style: TextStyle(fontWeight: FontWeight.bold, fontSize:12)),
+              subtitle: Text("Entered: ${sMarks.length}/${expectedSubjects.length} | Avg: ${avg.toStringAsFixed(1)} | Grade: ${UNEBGrading.gradeOnly(grading, avg)} | ${complete?"COMPLETE ✅":"Missing: ${missing.join(', ')} ❌"}", style: TextStyle(fontSize:9, color: complete? Colors.black : Colors.red)),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(icon: Icon(Icons.picture_as_pdf, color: Colors.red, size:20), onPressed: ()=> generateMergedReport(sid, sname)),
+                IconButton(icon: Icon(Icons.chat, color: Colors.green, size:20), onPressed: () async {
+                  String phone = s['parentPhone']??''; if(phone.isEmpty){ ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text("No phone"))); return; }
+                  String clean = phone.replaceAll(RegExp(r'[^0-9]'), ''); if(clean.startsWith('0')) clean='256${clean.substring(1)}';
+                  String msg = "Busalamu ${selTerm} ${selExam} ${selClass}${selStream} $sname Avg:${avg.toStringAsFixed(1)} ${UNEBGrading.gradeOnly(grading, avg)} Subs:${sMarks.length}/${expectedSubjects.length}";
+                  final uri = Uri.parse("https://wa.me/$clean?text=${Uri.encodeComponent(msg)}");
+                  if(await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }),
+              ]),
+            ));
+          })
+        ],
+        if(!loading && selClass!=null && students.isEmpty && selStream!=null) 
+          Padding(padding: EdgeInsets.all(20), child: Text("No students found for $selClass $selStream. Add students in Students module first.", style: TextStyle(color: Colors.red), textAlign: TextAlign.center)),
+      ]),
+    );
+  }
+}
+
+// TEACHER PAGES (same isolation - only his marks)
+class SubjectClassSelectPage extends StatefulWidget {
+  final Map<String,dynamic> teacher; final List<Timetable> myTimetable; final dynamic curUser;
+  const SubjectClassSelectPage({super.key, required this.teacher, required this.myTimetable, this.curUser});
+  @override State<SubjectClassSelectPage> createState()=> _SubjectClassSelectPageState();
+}
+
+class _SubjectClassSelectPageState extends State<SubjectClassSelectPage> {
+  String? selSubject, selClass, selStream, selTerm, selExam;
+  List<String> allTerms = ["Term I 2026","Term II 2026","Term III 2026"];
+  List<String> examTypes = ["BOT","MID","EOT"];
+  List<String> get mySubjects => widget.myTimetable.map((e)=> e.subject).toSet().toList()..sort();
+  List<String> get myClasses => widget.myTimetable.map((e)=> e.cls).toSet().toList()..sort();
+  List<String> get myStreamsForClass {
+    if(selClass==null) return widget.myTimetable.map((e)=> e.stream).toSet().toList();
+    return widget.myTimetable.where((e)=> e.cls==selClass).map((e)=> e.stream).toSet().toList();
+  }
+  String get autoGrading => (selClass=='S.5'||selClass=='S.6')? "A Level" : "New Curriculum";
+  @override Widget build(BuildContext c){
+    String teacherName = widget.teacher['name']??'';
+    return Scaffold(
+      appBar: AppBar(title: Text("Welcome $teacherName"), backgroundColor: Color(0xFF0D47A1), foregroundColor: Colors.white),
+      body: ListView(padding: EdgeInsets.all(16), children: [
+        Card(color: Colors.amber.shade50, child: ListTile(title: Text("Enter ONLY your subjects (from timetable grid)", style: TextStyle(fontWeight: FontWeight.bold, fontSize:12)), subtitle: Text("${widget.myTimetable.length} periods assigned | $autoGrading"))),
+        DropdownButtonFormField<String>(value: selSubject, decoration: InputDecoration(labelText: "Subject (your timetable only)", border: OutlineInputBorder(), isDense:true), items: (mySubjects.isEmpty? ["MATH"] : mySubjects).map((s)=> DropdownMenuItem(value:s, child: Text(s))).toList(), onChanged: (v)=> setState(()=> selSubject=v)),
+        SizedBox(height:8),
+        Row(children: [
+          Expanded(child: DropdownButtonFormField<String>(value: selClass, decoration: InputDecoration(labelText: "Class", border: OutlineInputBorder(), isDense:true), items: (myClasses.isEmpty? ["S.1","S.2"] : myClasses).map((s)=> DropdownMenuItem(value:s, child: Text(s))).toList(), onChanged: (v)=> setState((){ selClass=v; selStream=null; }))),
+          SizedBox(width:8),
+          Expanded(child: DropdownButtonFormField<String>(value: selStream, decoration: InputDecoration(labelText: "Stream", border: OutlineInputBorder(), isDense:true), items: myStreamsForClass.map((s)=> DropdownMenuItem(value:s, child: Text(s))).toList(), onChanged: (v)=> setState(()=> selStream=v))),
+        ]),
+        SizedBox(height:8),
+        Row(children: [
+          Expanded(child: DropdownButtonFormField<String>(value: selTerm, decoration: InputDecoration(labelText: "Term", border: OutlineInputBorder(), isDense:true), items: allTerms.map((s)=> DropdownMenuItem(value:s, child: Text(s))).toList(), onChanged: (v)=> setState(()=> selTerm=v))),
+          SizedBox(width:8),
+          Expanded(child: DropdownButtonFormField<String>(value: selExam, decoration: InputDecoration(labelText: "Exam", border: OutlineInputBorder(), isDense:true), items: examTypes.map((s)=> DropdownMenuItem(value:s, child: Text(s))).toList(), onChanged: (v)=> setState(()=> selExam=v))),
+        ]),
+        SizedBox(height:16),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF0D47A1), foregroundColor: Colors.white, padding: EdgeInsets.all(16)),
+          onPressed: (){
+            if(selSubject==null||selClass==null||selStream==null||selTerm==null||selExam==null){ ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text("Select all"))); return; }
+            Navigator.push(c, MaterialPageRoute(builder: (_)=> EnterMarksPage(teacher: widget.teacher, subject: selSubject!, cls: selClass!, stream: selStream!, term: selTerm!, exam: selExam!, grading: autoGrading, curUser: widget.curUser)));
+          },
+          child: Text("ENTER MY MARKS - $autoGrading")
+        ),
+      ]),
+    );
+  }
+}
+
+class EnterMarksPage extends StatefulWidget {
+  final Map<String,dynamic> teacher; final String subject, cls, stream, term, exam, grading; final dynamic curUser;
+  const EnterMarksPage({super.key, required this.teacher, required this.subject, required this.cls, required this.stream, required this.term, required this.exam, required this.grading, this.curUser});
+  @override State<EnterMarksPage> createState()=> _EnterMarksPageState();
+}
+
+class _EnterMarksPageState extends State<EnterMarksPage> {
+  List<Map<String,dynamic>> students=[]; Map<String, TextEditingController> ctrls={}; bool loading=true, saving=false;
+  @override void initState(){ super.initState(); _load(); }
+  Future<void> _load() async {
+    var snap = await FirebaseFirestore.instance.collection('students').where('cls', isEqualTo: widget.cls).where('stream', isEqualTo: widget.stream).get();
+    var list = snap.docs.map((d)=> d.data()).toList();
+    for(var s in list){
+      String sid=s['idNo']??''; String docId="${widget.term}_${widget.exam}_${widget.cls}_${widget.stream}_${widget.subject}_${sid}".replaceAll(' ', '_');
+      var mDoc=await FirebaseFirestore.instance.collection('marks').doc(docId).get();
+      ctrls[sid]=TextEditingController(text: mDoc.exists? mDoc.data()!['mark'].toString():'');
+    }
+    setState((){ students=list; loading=false; });
+  }
+  Future<void> _save() async {
+    setState(()=> saving=true);
+    var batch=FirebaseFirestore.instance.batch();
+    for(var s in students){
+      String sid=s['idNo']??''; if(ctrls[sid]!.text.trim().isEmpty) continue;
+      double mark=double.tryParse(ctrls[sid]!.text.trim())??0;
+      String docId="${widget.term}_${widget.exam}_${widget.cls}_${widget.stream}_${widget.subject}_${sid}".replaceAll(' ', '_');
+      batch.set(FirebaseFirestore.instance.collection('marks').doc(docId), {
+        'studentId': sid, 'studentName': s['name'], 'cls': widget.cls, 'stream': widget.stream, 'subject': widget.subject,
+        'term': widget.term, 'exam': widget.exam, 'mark': mark, 'grading': widget.grading,
+        'teacherId': widget.teacher['id'], 'teacherName': widget.teacher['name'], 'timestamp': FieldValue.serverTimestamp(),
+      }, SetOptions(merge:true));
+    }
+    await batch.commit(); setState(()=> saving=false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Saved ${widget.subject} ${widget.cls} ${widget.stream}"), backgroundColor: Colors.green));
+  }
+  @override Widget build(BuildContext c){
+    return Scaffold(
+      appBar: AppBar(title: Text("${widget.subject} ${widget.cls} ${widget.stream}"), backgroundColor: Color(0xFF0D47A1), foregroundColor: Colors.white, actions: [IconButton(onPressed: _save, icon: Icon(Icons.save))]),
+      body: loading? Center(child: CircularProgressIndicator()):
+      Column(children: [
+        Container(color: Colors.indigo.shade50, padding: EdgeInsets.all(8), child: Text("${widget.term} ${widget.exam} | ${widget.grading} | You enter ONLY ${widget.subject}", style: TextStyle(fontSize:11, fontWeight: FontWeight.bold))),
+        Expanded(child: ListView.builder(itemCount: students.length, itemBuilder: (c,i){
+          var s=students[i]; String sid=s['idNo']??'';
+          String g = ctrls[sid]!.text.isNotEmpty? UNEBGrading.gradeOnly(widget.grading, double.tryParse(ctrls[sid]!.text)??0) : '-';
+          return ListTile(dense:true, leading: CircleAvatar(radius:14, child: Text("${i+1}", style: TextStyle(fontSize:10))), title: Text(s['name']??'', style: TextStyle(fontSize:13, fontWeight: FontWeight.bold)), subtitle: Text("$sid | Grade: $g", style: TextStyle(fontSize:10)), trailing: SizedBox(width:80, child: TextField(controller: ctrls[sid], keyboardType: TextInputType.number, onChanged: (_)=>setState((){}), decoration: InputDecoration(labelText:"Mark", border: OutlineInputBorder(), isDense:true))));
+        })),
+        Padding(padding: EdgeInsets.all(10), child: ElevatedButton(onPressed: saving?null:_save, child: Text(saving?"Saving...":"SAVE MY ${widget.subject} MARKS"))),
+      ]),
+    );
+  }
+}
